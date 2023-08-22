@@ -27,6 +27,7 @@ import {DecentralizedStableCoin} from "./DecentralizedStableCoin.sol";
 import {ReentrancyGuard} from "@openzepplein/contracts/security/ReentrancyGuard.sol";
 import {IERC20} from "@openzepplein/contracts/token/ERC20/IERC20.sol";
 import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
+import {console} from "forge-std/console.sol";
 
 /*
  * @title DSCEngine
@@ -239,7 +240,9 @@ contract DSCEngine is ReentrancyGuard {
         _revertIfHealthFactorIsBroken(msg.sender); // I don't think this would ever hit...
     }
 
-    function getHealthFactor() external view {}
+    function getHealthFactor(address user) external view returns (uint256) {
+        return _healthFactor(user);
+    }
 
     ///////////////////
     // Private Functions
@@ -277,6 +280,10 @@ contract DSCEngine is ReentrancyGuard {
 
     function _healthFactor(address user) private view returns (uint256) {
         (uint256 totalDscMinted, uint256 collateralValueInUsd) = _getAccountInformation(user);
+        if (totalDscMinted <= 0) {
+            return 0;
+        }
+
         uint256 collateralAdjustedForThreshold = (collateralValueInUsd * LIQUIDATION_THRESHOLD) / LIQUIDATION_PRECISION;
         return (collateralAdjustedForThreshold * PRECISION) / totalDscMinted;
     }
@@ -288,7 +295,12 @@ contract DSCEngine is ReentrancyGuard {
     }
 
     function _revertIfHealthFactorIsBroken(address user) internal view {
+        if (s_dscMinted[user] <= 0) {
+            return;
+        }
+
         uint256 userHealthFactor = _healthFactor(user);
+
         if (userHealthFactor < MIN_HEAlTH_FACTOR) {
             revert DSCEngine__BreaksHealthFactor(userHealthFactor);
         }
@@ -328,5 +340,25 @@ contract DSCEngine is ReentrancyGuard {
         (, int256 price,,,) = priceFeed.latestRoundData();
 
         return ((usdAmountInWei * PRECISION) / (uint256(price) * ADDITIONAL_FEED_PRECISION));
+    }
+
+    function getCollateralDeposited(address user, address collateral) external view returns (uint256) {
+        return s_collateralDeposited[user][collateral];
+    }
+
+    function getDscMinted(address user) external view returns (uint256) {
+        return s_dscMinted[user];
+    }
+
+    function getDscAddress() external view returns (address) {
+        return address(i_dsc);
+    }
+
+    function getPrecision() external pure returns (uint256) {
+        return PRECISION;
+    }
+
+    function getAdditionalFeedPrecision() external pure returns (uint256) {
+        return ADDITIONAL_FEED_PRECISION;
     }
 }
