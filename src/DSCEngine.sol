@@ -68,7 +68,7 @@ contract DSCEngine is ReentrancyGuard {
     uint256 private constant PRECISION = 1e18;
     uint256 private constant LIQUIDATION_THRESHOLD = 50; // This means you need to be 200% over-collateralized
     uint256 private constant LIQUIDATION_PRECISION = 100; // This means you get assets at a 10% discount when liquidating
-    uint256 private constant MIN_HEAlTH_FACTOR = 1e18;
+    uint256 private constant MIN_HEALTH_FACTOR = 1e18;
     uint256 private constant LIQUIDATION_BONUS = 10;
 
     /// @dev Mapping of token address to price feed address
@@ -158,15 +158,13 @@ contract DSCEngine is ReentrancyGuard {
      * @notice: A known bug would be if the protocol was only 100% collateralized, we wouldn't be able to liquidate anyone.
      * For example, if the price of the collateral plummeted before anyone could be liquidated.
      */
+
     function liquidate(address collateral, address user, uint256 debtToCover)
         external
         moreThanZero(debtToCover)
         nonReentrant
     {
-        uint256 startingUserHealthFactor = _healthFactor(user);
-        if (startingUserHealthFactor >= MIN_HEAlTH_FACTOR) {
-            revert DSCENgine__HealthFactorOk();
-        }
+        (, uint256 startingUserHealthFactor) = _revertIfUserIsHealthy(user);
 
         uint256 tokenAmountFromDebtCovered = getTokenAmountFromUSD(collateral, debtToCover);
         uint256 bonusCollateralAmount = (tokenAmountFromDebtCovered * LIQUIDATION_BONUS) / LIQUIDATION_PRECISION;
@@ -280,8 +278,8 @@ contract DSCEngine is ReentrancyGuard {
 
     function _healthFactor(address user) private view returns (uint256) {
         (uint256 totalDscMinted, uint256 collateralValueInUsd) = _getAccountInformation(user);
-        if (totalDscMinted <= 0) {
-            return 0;
+        if (totalDscMinted == 0) {
+            return type(uint256).max;
         }
 
         uint256 collateralAdjustedForThreshold = (collateralValueInUsd * LIQUIDATION_THRESHOLD) / LIQUIDATION_PRECISION;
@@ -301,9 +299,28 @@ contract DSCEngine is ReentrancyGuard {
 
         uint256 userHealthFactor = _healthFactor(user);
 
-        if (userHealthFactor < MIN_HEAlTH_FACTOR) {
+        if (userHealthFactor < MIN_HEALTH_FACTOR) {
             revert DSCEngine__BreaksHealthFactor(userHealthFactor);
         }
+    }
+
+    function _isHealthy(uint256 num) internal pure returns (bool) {
+        return (num >= MIN_HEALTH_FACTOR);
+    }
+
+    function _revertIfIsHealthy(uint256 num) internal pure {
+        if (_isHealthy(num)) {
+            revert DSCENgine__HealthFactorOk();
+        }
+    }
+
+    function _revertIfUserIsHealthy(address user) internal view returns (bool, uint256) {
+        (bool isHealthy, uint256 healthFactor) = IsUserHealthy(user);
+        if (isHealthy) {
+            revert DSCENgine__HealthFactorOk();
+        }
+
+        return (isHealthy, healthFactor);
     }
 
     ////////////////////////////////////////////////////////////////////////////
@@ -360,5 +377,10 @@ contract DSCEngine is ReentrancyGuard {
 
     function getAdditionalFeedPrecision() external pure returns (uint256) {
         return ADDITIONAL_FEED_PRECISION;
+    }
+
+    function IsUserHealthy(address user) public view returns (bool, uint256) {
+        uint256 healthFactor = _healthFactor(user);
+        return (_isHealthy(healthFactor), healthFactor);
     }
 }
